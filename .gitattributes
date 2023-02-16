@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+#
+# These attribute rules were taken from various files from the
+# https://github.com/alexkaratarakis/gitattributes repository, but modified for
+# our project use case.
+
+# Common settings that generally should always be used with your language specific settings
+
+# Auto detect text files and perform LF normalization
+*          text=auto
+
+#
+# The above will handle all files NOT found below
+#
+
+# Documents
+*.md       text diff=markdown
+*.txt      text
+
+#
+# Exclude files from exporting
+#
+
+.gitattributes export-ignore
+.gitignore     export-ignore
+.gitkeep       export-ignore
+
+# Sources
+*.cpp   text diff=cpp
+*.h     text diff=cpp
