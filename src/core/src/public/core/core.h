@@ -26,100 +26,21 @@
 #include <cstring>
 
 namespace samething {
-struct HeaderInfo {
-  /// How many seconds will the attention signal last?
-  int attention_signal_num_secs;
-
-  /// Location code - Indicates the geographic area affected by the EAS alert.
-  /// There may be 31 location codes in an EAS alert.
-  ///
-  /// P - County subdivision
-  /// SS - State
-  /// CCC - County or City
-  char PSSCCC[31][6];
-
-  /// This is the identification of the EAS participant, NWS office, etc.,
-  /// transmitting or retransmitting the message. These codes will be
-  /// automatically affixed to all outgoing messages by the EAS encoder.
-  char LLLLLLLL[8];
-
-  /// This is the day in Julian Calendar days (JJJ) of the year and the time in
-  /// hours and minutes (HHMM) when the message was initially released by the
-  /// originator using 24 hour Universal Coordinated Time (UTC).
-  char JJJHHMM[7];
-
-  /// +TTTT: Valid time period of a message in 15 minute segments up to one hour
-  /// and then in 30 minute segments beyond one hour.
-  char TTTT[4];
-
-  /// Originator code - indicates who originally initiated the activation of the
-  /// EAS.
-  char ORG[3];
-
-  /// Event code - Indicates the nature of the EAS activation.
-  char EEE[3];
-};
-
-enum class ReturnCodes {
-  kNoError,
-#ifdef SAMETHING_ENFORCE_MSG_VALIDITY
-  kNoLocationCodes,
-
-  /// The application has requested an attention signal duration outside of the
-  /// range of 8 and 25.
-  kInvalidAttentionSignalDuration,
-
-  /// The application has requested a non-standard originator code.
-  kInvalidORG,
-
-  /// The application has requested a non-standard event code.
-  kInvalidEEE,
-
-  /// The application has requested a non-standard county subdivision.
-  kInvalidP,
-
-  /// The application has requested a non-standard state.
-  kInvalidSS,
-
-  /// The application has requested a non-standard county or city code (unused).
-  kInvalidCCC,
-
-  /// The application has requested an invalid time period.
-  kInvalidTTTT,
-
-  /// The application has specified an invalid originator release time.
-  kInvalidJJJHHMM,
-
-  /// The application has specified an invalid station identification.
-  kInvalidLLLLLLLL
-#endif  // SAMETHING_ENFORCE_MSG_VALIDITY
-};
-
 /// This class allows the end-user to generate Specific Area Message Encoding
 /// (SAME) headers. This is the class that all applications should use.
 ///
 /// Some points to make note of here:
 ///
 /// a) The sample rate is fixed to 44100Hz. There's really no good reason to go
-///    above or below it.
+///    above or below it. Unfortunately, the sample rate is not defined in the
+///    specification.
 ///
 /// b) Since we do not use any dynamic memory allocation, whenever a sample is
 ///    generated a function is called to handle the sample as the application
 ///    sees fit. Since the length of the header can vary, there's little choice
-///    here. Otherwise, we would've just dumped everything into a fixed-size
-///    buffer.
+///    here.
 ///
-/// c) In the interest of reducing code size and improving performance, checking
-///    to see if the given header contains standard compliant header codes (with
-///    the exception of the CCC field) is disabled by default.
-///
-///    However, this can be enabled at compile-time by defining
-///    SAMETHING_ENFORCE_MSG_VALIDITY. The idea is that the application
-///    author(s) test their code to ensure a user can only pass standard codes.
-///    If one doesn't care about that though, then it's in their best interest
-///    to leave this undefined.
-///
-/// d) Single-precision floating point is enforced; double precision is not
+/// c) Single-precision floating point is enforced; double precision is not
 ///    necessary and many embedded targets do not have double-precision FPUs
 ///    which would lead to an unnecessary performance drop and code size
 ///    increase as softfloat would be required.
@@ -129,50 +50,132 @@ enum class ReturnCodes {
 /// user to change what function is called. This would also pessimize
 /// optimization opportunities.
 template <typename SampleGeneratedCallback>
-class SAMEGenerator {
+class SAMEGenerator final {
  public:
-  /// Generates a SAME header.
+  /// The maximum number of counties for each state.
+  static constexpr int kCountiesNumMax = 70;
+
+  /// The number of states we support.
+  static constexpr int kStatesNumMax = 50;
+
+  /// The shortest duration of an attention signal.
+  static constexpr int kAttentionSignalMin = 8;
+
+  /// The longest duration of an attention signal.
+  static constexpr int kAttentionSignalMax = 25;
+
+  /// The longest valid time period possible (hh'mm).
+  static constexpr int kLongestValidTimePeriod = 24'00;
+
+  /// This monstrocity of a table should be used to populate user interfaces.
+  /// The interface should be designed such that a change here is automatically
+  /// reflected in a user interface.
+  static constexpr struct {
+    const char* const name;
+    int num_counties;
+    const char* const county_names[kCountiesNumMax];
+  } state_county_map[kStatesNumMax] = {
+      {"Alabama",
+       67,
+       {"Autauga",    "Baldwin",    "Barbour",    "Bibb",       "Blount",
+        "Bullock",    "Butler",     "Calhoun",    "Chambers",   "Cherokee",
+        "Chilton",    "Choctaw",    "Clarke",     "Clay",       "Cleburne",
+        "Coffee",     "Colbert",    "Conecuh",    "Coosa",      "Covington",
+        "Crenshaw",   "Cullman",    "Dale",       "Dallas",     "DeKalb",
+        "Elmore",     "Escambia",   "Etowah",     "Fayette",    "Franklin",
+        "Geneva",     "Greene",     "Hale",       "Henry",      "Houston",
+        "Jackson",    "Jefferson",  "Lamar",      "Lauderdale", "Lawrence",
+        "Lee",        "Limestone",  "Lowndes",    "Macon",      "Madison",
+        "Marengo",    "Marion",     "Marshall",   "Mobile",     "Monroe",
+        "Montgomery", "Morgan",     "Perry",      "Pickens",    "Pike",
+        "Randolph",   "Russell",    "St.Clair",   "Shelby",     "Sumter",
+        "Talladega",  "Tallapoosa", "Tuscaloosa", "Walker",     "Washington",
+        "Wilcox",     "Winston"}},
+      {"Alaska",
+       31,
+       {"Aleutians East Borough",
+        "Aleutians West Census Area",
+        "Anchorage Municipality",
+        "Bethel Census Area",
+        "Bristol Bay Borough",
+        "Chugach Census Area",
+        "Copper River Census Area",
+        "Denali Borough",
+        "Dillingham Census Area",
+        "Fairbanks North Star Borough",
+        "Haines Borough",
+        "Hoonah-Angoon Census Area",
+        "Juneau City and Borough",
+        "Kenai Peninsulua Borough",
+        "Ketchikan Gateway Borough",
+        "Kodiak Island Borough",
+        "Kusilvak",
+        "Lake and Peninsula Borough",
+        "Matanuska-Susitna Borough",
+        "Nome Census Area",
+        "North Slope Borough",
+        "Northwest Arctic Borough",
+        "Petersburg Borough",
+        "Prince of Wales-Hyder Census Area",
+        "Sitka City and Borough",
+        "Skagway Municipality",
+        "Southeast Fairbanks Census Area",
+        "Valdez-Cordova Census Area",
+        "Wrangell City and Borough",
+        "Yakutat City and Borough",
+        "Yukon-Koyukuk Census Area"}},
+      {"Arizona",
+       15,
+       {"Apache", "Cochise", "Coconino", "Gila", "Graham", "Greenlee", "La Paz",
+        "Maricopa", "Mohave", "Navajo", "Pima", "Pinal", "Santa Cruz",
+        "Yavapai", "Yuma"}}};
+
+  /// Sets the attention signal duration.
   ///
-  /// \param info The header.
-  /// \return ReturnCodes::kNoError if no error occurred.
-  [[nodiscard]] constexpr ReturnCodes Generate(HeaderInfo& info) noexcept {
-#ifdef SAMETHING_ENFORCE_MSG_VALIDITY
-    if (!AttentionSignalDurationValid(info.attention_signal_num_secs)) {
-      return ReturnCodes::kInvalidAttentionSignalDuration;
+  /// If this method fails, the original attention signal duration will be
+  /// preserved.
+  ///
+  /// \param duration The desired duration of the attention signal.
+  /// \return `false` if the attention signal duration is out of bounds, or
+  /// `true` otherwise indicating success.
+  [[nodiscard]] constexpr bool AttentionSignalDurationIsValid(
+      const int duration) noexcept {
+    if ((duration < kAttentionSignalMin) || (duration > kAttentionSignalMax)) {
+      return false;
+    }
+    attention_signal_duration_ = duration;
+    return true;
+  }
+
+  /// Sets the valid time period of a message.
+  ///
+  /// \param time_period The desired valid time period.
+  /// \return `false` if either the time period exceeds 2400 (24 hours) or the
+  [[nodiscard]] constexpr bool TimePeriodSet(const int time_period) noexcept {
+    if (time_period > kLongestValidTimePeriod) {
+      return false;
     }
 
-    if (!ORGCodeValid(info.ORG)) {
-      return ReturnCodes::kInvalidORG;
+    const int segments = (time_period <= 100) ? 15 : 30;
+    const int minutes = time_period % 100;
+
+    if ((minutes % segments) == 0) {
+      return false;
     }
 
-    if (!EEECodeValid(info.EEE)) {
-      return ReturnCodes::kInvalidEEE;
-    }
+    valid_time_period_[0] = ((time_period / 1000) % 10) + '0';
+    valid_time_period_[1] = ((time_period / 100) % 10) + '0';
+    valid_time_period_[2] = ((time_period / 10) % 10) + '0';
+    valid_time_period_[3] = (time_period % 10) + '0';
+  }
 
-    if (!TTTTValid(info.TTTT)) {
-      return ReturnCodes::kInvalidTTTT;
-    }
-
-    // XXX: We don't check for PSSCCC validity here, that's done after this.
-
-    if (!JJJHHMMValid(info.JJJHHMM)) {
-      return ReturnCodes::kInvalidJJJHHMM;
-    }
-
-    if (!LLLLLLLLValid(info.LLLLLLLL)) {
-      return ReturnCodes::kInvalidLLLLLLLL;
-    }
-
-    // XXX: County ANSI numbers are contained in the State EAS Mapbook; we won't
-    // bother checking those for now as there are simply far too many to go
-    // through.
-#endif  // SAMETHING_ENFORCE_MSG_VALIDITY
-
+  /// Generates a SAME header.
+  constexpr void Generate() noexcept {
     // The transmission is as follows:
     //
-    // [PREAMBLE]ZCZC-ORG-EEE-PSSCCC + TTTT-JJJHHMM-LLLLLLLL-(1 second silence)
-    // [PREAMBLE]ZCZC-ORG-EEE-PSSCCC + TTTT-JJJHHMM-LLLLLLLL-(1 second silence)
-    // [PREAMBLE]ZCZC-ORG-EEE-PSSCCC + TTTT-JJJHHMM-LLLLLLLL-(1 second silence)
+    // [PREAMBLE]ZCZC-ORG-EEE-PSSCCC+TTTT-JJJHHMM-LLLLLLLL-(1 second silence)
+    // [PREAMBLE]ZCZC-ORG-EEE-PSSCCC+TTTT-JJJHHMM-LLLLLLLL-(1 second silence)
+    // [PREAMBLE]ZCZC-ORG-EEE-PSSCCC+TTTT-JJJHHMM-LLLLLLLL-(1 second silence)
     // (transmission of 8 to 25 seconds of Attention Signal)
     // (transmission of audio, video or text messages) (not implemented)
     // (at least a one second pause)
@@ -184,63 +187,58 @@ class SAMEGenerator {
     // [8 bit byte 10101011]) sent to clear the system, set AGC and set
     // asynchronous decoder clocking cycles. The preamble must be transmitted
     // before each header and End of Message code.
+    constexpr uint8_t PREAMBLE = 0b1010'1011;
+    constexpr int kNumBursts = 3;
 
-    uint8_t header_data[80] = {
-        0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011,
-        0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011,
-        0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011,
-        0b1010'1011, 'Z',         'C',         'Z',         'C',
-        '-',         'O',         'R',         'G',         '-',
-        'E',         'E',         'E',         '-',         'P',
-        'S',         'S',         'C',         'C',         'C',
-        '-'};
+    uint8_t header_data_[252] = {};
 
-    constexpr uint8_t eom[] = {
-        0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011,
-        0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011,
-        0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011, 0b1010'1011,
-        0b1010'1011, 'N',         'N',         'N',         'N'};
+    constexpr uint8_t eom[] = {PREAMBLE, PREAMBLE, PREAMBLE, PREAMBLE, PREAMBLE,
+                               PREAMBLE, PREAMBLE, PREAMBLE, PREAMBLE, PREAMBLE,
+                               PREAMBLE, PREAMBLE, PREAMBLE, PREAMBLE, PREAMBLE,
+                               PREAMBLE, 'N',      'N',      'N',      'N'};
 
+    // Start from here
     int header_offset = 29;
 
-    for (int i = 0; i < 31; ++i) {
-#ifdef SAMETHING_ENFORCE_MSG_VALIDITY
-      if (!*info.PSSCCC[i]) {
-        if (i == 0) {
-          // The end of location codes marker was seen, but we're at the first
-          // entry of the PSSCCC field. Therefore, no locations were specified.
-          return ReturnCodes::kNoLocationCodes;
-        }
-      }
-
-      if ((info.PSSCCC[i][0] - '0') > 9) {
-        return ReturnCodes::kInvalidP;
-      }
-#endif  // SAMETHING_ENFORCE_MSG_VALIDITY
+#if 0
+    for (int i = 0; i < info.PSCC; ++i) {
       memcpy(&header_data[header_offset], info.PSSCCC[i], 6);
       header_offset += 7;
     }
-
-    memcpy(&header_data[22], info.ORG, sizeof(info.ORG));
-    memcpy(&header_data[26], info.EEE, sizeof(info.EEE));
-    memcpy(&header_data[40], info.TTTT, sizeof(info.TTTT));
+    memcpy(&header_data[40], valid_time_period_, sizeof(valid_time_period_));
     memcpy(&header_data[45], info.JJJHHMM, sizeof(info.JJJHHMM));
+#endif
 
-    for (int i = 0; i < 3; ++i) {
-      AFSKGenerate(header_data, header_offset);
+    for (int bursts = 0; bursts < kNumBursts; ++bursts) {
+      AFSKGenerate(header_data_, header_offset);
       SilenceGenerate();
     }
-    AttentionSignalGenerate(info.attention_signal_num_secs);
+    AttentionSignalGenerate();
     SilenceGenerate();
 
-    for (int i = 0; i < 3; ++i) {
+    for (int bursts = 0; bursts < kNumBursts; ++bursts) {
       AFSKGenerate(eom, 20);
       SilenceGenerate();
     }
-    return ReturnCodes::kNoError;
   }
 
  private:
+  static constexpr int kSSCCCLength = 5;
+
+  static constexpr const char ssccc_map[kStatesNumMax][kCountiesNumMax][kSSCCCLength] = {
+      { // Alabama
+       {'0', '1', '0', '0', '1'}, // Autauga
+       {'0', '1', '0', '0', '3'}, // Baldwin
+       {'0', '1', '0', '0', '5'}, // Barbour
+       {'0', '1', '0', '0', '7'}, // Bibb
+       {'0', '1', '0', '0', '9'}, // Blount
+       {'0', '1', '0', '1', '1'}, // Bullock
+       {'0', '1', '0', '1', '3'}, // Butler
+       {'0', '1', '0', '1', '5'}, // Calhoun
+       {'0', '1', '0', '1', '7'}, // Chambers
+      }
+  };
+
   // The Preamble and EAS codes must use Audio Frequency Shift Keying at a
   // rate of 520.83 bits per second to transmit the codes.
   static constexpr float kBitRate = 520.83F;
@@ -251,12 +249,12 @@ class SAMEGenerator {
   // The maximum number of samples we will ever output.
   static constexpr float kSampleRate = 44100.0F;
 
-  constexpr void AFSKGenerate(const std::uint8_t* const data,
-                              const size_t data_size) noexcept {
+  constexpr void AFSKGenerate(const uint8_t* const data,
+                              const int data_size) noexcept {
     constexpr float kMarkFreq = 2083.3F;
     constexpr float kSpaceFreq = 1562.5F;
 
-    for (size_t i = 0; i < data_size; ++i) {
+    for (int i = 0; i < data_size; ++i) {
       for (int bit_pos = 0; bit_pos < 8; ++bit_pos) {
         const int bit = (data[i] >> bit_pos) & 1;
         SineGenerate(kBitDuration, bit ? kMarkFreq : kSpaceFreq);
@@ -264,11 +262,10 @@ class SAMEGenerator {
     }
   }
 
-  /// Generates an attention signal.
-  ///
-  /// \param num_secs How long will the attention signal last for in seconds?
-  constexpr void AttentionSignalGenerate(const float num_secs) noexcept {
-    const int num_samples = static_cast<int>(num_secs * kSampleRate);
+  // Generates an attention signal.
+  constexpr void AttentionSignalGenerate() noexcept {
+    const int num_samples =
+        static_cast<int>(attention_signal_duration_ * kSampleRate);
 
     for (int sample_num = 0; sample_num < num_samples; ++sample_num) {
       ;
@@ -279,7 +276,7 @@ class SAMEGenerator {
   ///
   /// \param duration How many seconds the sine wave will last for.
   /// \param freq The frequency of the sine wave.
-  constexpr void SineGenerate(float duration, float freq) noexcept {
+  constexpr void SineGenerate(const float duration, const float freq) noexcept {
     const int num_samples = static_cast<int>(duration * kSampleRate);
 
     for (int sample_num = 0; sample_num < num_samples; ++sample_num) {
@@ -298,119 +295,9 @@ class SAMEGenerator {
     }
   }
 
-#ifdef SAMETHING_ENFORCE_MSG_VALIDITY
-  /// Helper function to determine if a string exists within an array.
-  ///
-  /// \param str The string to check for in the array.
-  /// \param array The array to search in.
-  /// \param array_size The size of the array we're searching in.
-  [[nodiscard]] constexpr bool StringExistsIn(
-      const char* const str, const char* const array,
-      const int array_size) const noexcept {
-    assert(str);
-    assert(array);
-    assert(array_size > 0);
-
-    if (!*str) {
-      return false;
-    }
-
-    for (int i = 0; i < array_size; ++i) {
-      if (strcmp(&array[i], str) == 0) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Verifies that the given attention signal duration is valid.
-  ///
-  /// A valid attention signal duration is between the range of 8 to 25.
-  ///
-  /// \param attention_signal_range The given attention signal duration.
-  /// \return `true` if the attention signal duration is valid, `false`
-  /// otherwise.
-  [[nodiscard]] constexpr bool AttentionSignalDurationValid(
-      const int attention_signal_duration) const noexcept {
-    return (attention_signal_duration >= 8) &&
-           (attention_signal_duration <= 25);
-  }
-
-  /// Verifies that the given originator code (ORG) is valid.
-  ///
-  /// \param org The originator code.
-  /// \return `true` if the originator code is valid, `false` otherwise.
-  [[nodiscard]] constexpr bool ORGCodeValid(
-      const char* const org) const noexcept {
-    assert(org);
-
-    constexpr const char* valid_org_codes[] = {"EAS", "CIV", "WXR", "PEP"};
-    return StringExistsIn(org, *valid_org_codes, 4);
-  }
-
-  /// Verifies that the given event code (EEE) is valid.
-  ///
-  /// \param eee The event code.
-  /// \return `true` if the event code is valid, `false` otherwise.
-  [[nodiscard]] constexpr bool EEECodeValid(
-      const char* const eee) const noexcept {
-    assert(eee);
-
-    constexpr const char* valid_eee_codes[] = {
-        "EAN", "NPT", "RMT", "RWT", "ADR", "AVW", "AVA", "BZW", "BLU", "CAE",
-        "CDW", "CEM", "CFW", "CFA", "DSW", "EQW", "EVI", "EWW", "FRW", "FFW",
-        "FFA", "FFS", "FLW", "FLA", "FLS", "HMW", "HWW", "HWA", "HUW", "HUA",
-        "HLS", "LEW", "LAE", "NMN", "TOE", "NUW", "DMO", "RHW", "SVR", "SVA",
-        "SVS", "SPW", "SMW", "SPS", "SSA", "SSW", "TOR", "TOA", "TRW", "TRA",
-        "TSW", "TSA", "VOW", "WSW", "WSA"};
-    return StringExistsIn(eee, *valid_eee_codes, 55);
-  }
-
-  /// Verifies that the given TTTT (valid time period) is valid.
-  ///
-  /// \param tttt The time period.
-  /// \return `true` if the time period is valid, `false` otherwise.
-  [[nodiscard]] constexpr bool TTTTValid(
-      const char* const tttt) const noexcept {
-    assert(tttt);
-
-    if (!*tttt) {
-      return false;
-    }
-
-    const long value = strtol(tttt, nullptr, 10);
-
-    // XXX: I really doubt that the TTTT field is supposed to be greater than 24
-    // hours, but I have no proof of that. We'll leave it alone for now.
-
-    const int segments = (value <= 100) ? 15 : 30;
-    const long minutes = value % 100;
-
-    return (minutes % segments) == 0;
-  }
-
-  [[nodiscard]] constexpr bool JJJHHMMValid(
-      const char* const jjjhhmm) const noexcept {
-    assert(jjjhhmm);
-
-    if (!*jjjhhmm) {
-      return false;
-    }
-    return true;
-  }
-
-  [[nodiscard]] constexpr bool LLLLLLLLValid(
-      const char* const llllllll) const noexcept {
-    assert(llllllll);
-
-    if (!*llllllll) {
-      return false;
-    }
-    return true;
-  }
-#endif  // SAMETHING_ENFORCE_MSG_VALIDITY
-
-  /// The function to call when a sample has been generated.
+  // The function to call when a sample has been generated.
   SampleGeneratedCallback sample_generated_cb_;
+
+  int attention_signal_duration_;
 };
 }  // namespace samething

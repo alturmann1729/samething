@@ -43,3 +43,12 @@ set(CMAKE_AR
 
 set(CMAKE_RANLIB
     "~/samething-toolchain/llvm/bin/llvm-ranlib" CACHE FILEPATH "LLVM ranlib")
+
+set(CMAKE_READELF
+    "~/samething-toolchain/llvm/bin/llvm-readelf" CACHE FILEPATH "LLVM readelf")
+
+set(CMAKE_ADDR2LINE
+    "~/samething-toolchain/llvm/bin/llvm-addr2line" CACHE FILEPATH "LLVM addr2line")
+
+set(CMAKE_DLLTOOL
+    "~/samething-toolchain/llvm/bin/llvm-dlltool" CACHE FILEPATH "LLVM dlltool")

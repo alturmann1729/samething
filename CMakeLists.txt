@@ -86,15 +86,7 @@ endif()
 add_library(samething-build-options INTERFACE)
 
 option(SAMETHING_IPO_ENABLE "Enable inter-procedural optimization" OFF)
-option(SAMETHING_TESTS_BUILD "Build unit tests (forcibly enables header validity checks)" OFF)
-option(SAMETHING_ENFORCE_VALIDITY "Enforce header validity at core level" OFF)
-
-include(CMakeDependentOption)
-
-# Forcibly enable header validity checking if unit tests are being built.
-cmake_dependent_option(SAMETHING_ENFORCE_VALIDITY
-                       "Enforce header validity at core level" ON
-                       "SAMETHING_TESTS_BUILD" OFF)
+option(SAMETHING_TESTS_BUILD "Build unit tests" OFF)
 
 # All targets under our control will use C++17 with extensions enabled.
 set_target_properties(samething-build-options PROPERTIES
@@ -110,7 +102,7 @@ target_compile_options(samething-build-options INTERFACE -fno-asynchronous-unwin
                                                          -pipe)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  target_compile_options(samething-build-options INTERFACE -glldb
+  target_compile_options(samething-build-options INTERFACE -ggdb
                                                            -Wall
                                                            -Werror
                                                            -Wextra)

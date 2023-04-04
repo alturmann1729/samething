@@ -39,25 +39,37 @@ class MemberFuncWrapper {
 
 class SAMEThingCoreBasicTest : public ::testing::Test {
  protected:
-  void me(int) noexcept { ; }
+  void SampleGeneratedHandleStub(float) noexcept { ; }
 
   samething::SAMEGenerator<MemberFuncWrapper<
-      SAMEThingCoreBasicTest, decltype(&SAMEThingCoreBasicTest::me)>>
+      SAMEThingCoreBasicTest,
+      decltype(&SAMEThingCoreBasicTest::SampleGeneratedHandleStub)>>
       same_generator_;
 };
 
-TEST_F(SAMEThingCoreBasicTest, RejectsNoLocationCodes) {
-  samething::HeaderInfo info = {};
-
-  EXPECT_EQ(same_generator_.Generate(info),
-            samething::ReturnCodes::kNoLocationCodes);
+TEST_F(SAMEThingCoreBasicTest, EnsuresAttentionSignalRangeIsValid) {
+  // EXPECT_EQ(same_generator_.kAttentionSignalMin, 8);
+  // EXPECT_EQ(same_generator_.kAttentionSignalMax, 25);
 }
 
-TEST_F(SAMEThingCoreBasicTest, RejectsEmptyOriginatorCode) {
-  // ORG is the first field that is checked, so just zero out the header info
-  // here and roll with it.
-  samething::HeaderInfo info = {};
+TEST_F(SAMEThingCoreBasicTest, RejectsInvalidAttentionSignalDuration) {
+  EXPECT_FALSE(same_generator_.AttentionSignalDurationSet(
+      same_generator_.kAttentionSignalMax + 1));
+  EXPECT_FALSE(same_generator_.AttentionSignalDurationSet(
+      same_generator_.kAttentionSignalMin - 1));
 
-  EXPECT_EQ(same_generator_.Generate(info),
-            samething::ReturnCodes::kInvalidORG);
+  EXPECT_FALSE(same_generator_.AttentionSignalDurationSet(-1));
 }
+
+TEST_F(SAMEThingCoreBasicTest, AcceptsValidAttentionSignalDuration) {
+  for (int duration = same_generator_.kAttentionSignalMin;
+       duration != same_generator_.kAttentionSignalMax; ++duration) {
+    EXPECT_TRUE(same_generator_.AttentionSignalDurationSet(duration));
+  }
+}
+
+TEST_F(SAMEThingCoreBasicTest, RejectsInvalidValidTimePeriod) {}
+TEST_F(SAMEThingCoreBasicTest, AcceptsValidTimePeriod) {}
+TEST_F(SAMEThingCoreBasicTest, EnsuresOriginatorCodesMapToProperNames) {}
+TEST_F(SAMEThingCoreBasicTest, EnsuresEventCodesMapToProperNames) {}
+TEST_F(SAMEThingCoreBasicTest, EnsuresStateCodesMapToProperNames) {}

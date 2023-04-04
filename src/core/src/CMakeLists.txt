@@ -24,10 +24,6 @@ set(HDRS_PUBLIC public/core/core.h)
 
 add_library(samethingcore INTERFACE ${HDRS_PUBLIC})
 
-if (SAMETHING_ENFORCE_VALIDITY)
-  target_compile_definitions(samethingcore INTERFACE -DSAMETHING_ENFORCE_MSG_VALIDITY)
-endif()
-
 # Make sure that we can see the public include files, and make sure that anyone
 # who links with us can see them, too.
 target_include_directories(samethingcore INTERFACE public)

@@ -22,3 +22,6 @@
 
 # We always want to compile the core first.
 add_subdirectory(core)
+
+# Now, compile any frontends.
+add_subdirectory(frontend)
